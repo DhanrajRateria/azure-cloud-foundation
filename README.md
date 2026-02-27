@@ -1,34 +1,30 @@
-# Azure Cloud Foundation
+<!-- BEGIN_TF_DOCS -->
+## Requirements
 
-Enterprise-grade Azure cloud estate provisioned with Terraform.
+| Name | Version |
+|------|---------|
+| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.7.0 |
+| <a name="requirement_azuread"></a> [azuread](#requirement\_azuread) | ~> 2.47 |
+| <a name="requirement_azurerm"></a> [azurerm](#requirement\_azurerm) | ~> 3.100 |
+| <a name="requirement_random"></a> [random](#requirement\_random) | ~> 3.6 |
 
-## Architecture
+## Providers
 
-Multi-environment (Dev/Staging/Prod) Hub-Spoke network topology with:
-- Zero-trust network design using Private Endpoints
-- Centralized logging via Log Analytics
-- Azure Key Vault for secrets management
-- Azure Bastion for secure access
-- RBAC with least-privilege design
-- Azure Policy for governance enforcement
-- Cost budgets and alerting
+No providers.
 
-## Documentation
+## Modules
 
-- [Architecture Overview](docs/architecture.md)
-- [Network Design](docs/network-design.md)
-- [RBAC Design](docs/rbac-design.md)
-- [Security Model](docs/security-model.md)
-- [Runbooks](docs/runbooks/)
+No modules.
 
-## Environments
+## Resources
 
-| Environment | Purpose | State File |
-|-------------|---------|------------|
-| dev | Development and testing | `dev/terraform.tfstate` |
-| staging | Pre-production validation | `staging/terraform.tfstate` |
-| prod | Production workloads | `prod/terraform.tfstate` |
+No resources.
 
-## Getting Started
+## Inputs
 
-See [docs/getting-started.md](docs/getting-started.md)
+No inputs.
+
+## Outputs
+
+No outputs.
+<!-- END_TF_DOCS -->
