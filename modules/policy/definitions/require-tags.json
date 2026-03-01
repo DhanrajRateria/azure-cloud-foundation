@@ -1,0 +1,21 @@
+{
+  "if": {
+    "allOf": [
+      {
+        "field": "tags['environment']",
+        "exists": "false"
+      },
+      {
+        "field": "tags['owner']",
+        "exists": "false"
+      },
+      {
+        "field": "tags['cost-center']",
+        "exists": "false"
+      }
+    ]
+  },
+  "then": {
+    "effect": "Audit"
+  }
+}
