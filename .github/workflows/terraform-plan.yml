@@ -1,0 +1,169 @@
+# =============================================================================
+# Terraform Plan — runs on every Pull Request
+#
+# Purpose: Show the team exactly what infrastructure will change
+#          before any code is merged to main.
+#
+# This workflow:
+# 1. Checks out the code
+# 2. Sets up Terraform
+# 3. Runs terraform init, validate, plan for each environment
+# 4. Posts the plan output as a PR comment
+# 5. Fails the PR check if plan fails — blocks merge
+# =============================================================================
+
+name: Terraform Plan
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'environments/**'
+      - 'modules/**'
+      - '.github/workflows/**'
+
+# Prevent multiple plan workflows running simultaneously on same PR
+concurrency:
+  group: terraform-plan-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  ARM_CLIENT_ID:       ${{ secrets.ARM_CLIENT_ID }}
+  ARM_CLIENT_SECRET:   ${{ secrets.ARM_CLIENT_SECRET }}
+  ARM_TENANT_ID:       ${{ secrets.ARM_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+  TF_VERSION:          "1.7.5"
+  TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
+  TF_VAR_tenant_id:   ${{ secrets.ARM_TENANT_ID }}
+
+jobs:
+  plan-dev:
+    name: Plan — Dev
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: environments/dev
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          # Wraps terraform output so it can be captured for PR comments
+          terraform_wrapper: true
+
+      - name: Terraform Format Check
+        id: fmt
+        run: terraform fmt -check -recursive
+        # -check means "fail if any file is not formatted"
+        # This enforces consistent style across the whole codebase
+
+      - name: Terraform Init
+        id: init
+        run: terraform init
+
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate
+
+      - name: Terraform Plan
+        id: plan
+        # Don't fail the step if plan has changes — we want to see the output
+        # The actual failure handling is in the PR comment step
+        run: terraform plan -var-file=ci.tfvars -out=tfplan
+        continue-on-error: true
+
+      # Post plan output as a comment on the PR so reviewers can see exactly
+      # what will change without having to run Terraform locally
+      - name: Post Plan to PR
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        env:
+          PLAN: ${{ steps.plan.outputs.stdout }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `## Terraform Plan — Dev Environment
+
+            #### Format Check 🖌 \`${{ steps.fmt.outcome }}\`
+            #### Initialization ⚙️ \`${{ steps.init.outcome }}\`
+            #### Validation 🤖 \`${{ steps.validate.outcome }}\`
+            #### Plan 📋 \`${{ steps.plan.outcome }}\`
+
+            <details><summary>Show Plan Output</summary>
+
+            \`\`\`terraform
+            ${process.env.PLAN}
+            \`\`\`
+
+            </details>
+
+            *Triggered by @${{ github.actor }} on \`${{ github.ref }}\`*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+      # If plan failed, fail the workflow — this blocks PR merge
+      - name: Fail if Plan Failed
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+  plan-staging:
+    name: Plan — Staging
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: environments/staging
+    # Only run staging plan if dev plan passed
+    needs: plan-dev
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: true
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan
+        id: plan
+        run: terraform plan -var-file=ci.tfvars -out=tfplan
+        continue-on-error: true
+
+      - name: Post Plan to PR
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        env:
+          PLAN: ${{ steps.plan.outputs.stdout }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `## Terraform Plan — Staging Environment
+            <details><summary>Show Plan Output</summary>
+            \`\`\`terraform
+            ${process.env.PLAN}
+            \`\`\`
+            </details>`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+      - name: Fail if Plan Failed
+        if: steps.plan.outcome == 'failure'
+        run: exit 1

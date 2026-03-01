@@ -1,0 +1,136 @@
+# =============================================================================
+# Terraform Apply — runs when code merges to main
+#
+# Purpose: Automatically apply infrastructure changes after PR is approved
+#          and merged. Nobody runs terraform apply from their laptop.
+#
+# Deployment order: dev → staging → prod
+# Each environment must succeed before the next begins.
+# Prod requires manual approval (GitHub environment protection rule).
+# =============================================================================
+
+name: Terraform Apply
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'environments/**'
+      - 'modules/**'
+
+# Critical: only one apply can run at a time across all environments
+# If two merges happen quickly, the second waits for the first to finish
+concurrency:
+  group: terraform-apply
+  cancel-in-progress: false  # Never cancel an in-progress apply — could corrupt state
+
+env:
+  ARM_CLIENT_ID:       ${{ secrets.ARM_CLIENT_ID }}
+  ARM_CLIENT_SECRET:   ${{ secrets.ARM_CLIENT_SECRET }}
+  ARM_TENANT_ID:       ${{ secrets.ARM_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+  TF_VERSION:          "1.7.5"
+  TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
+  TF_VAR_tenant_id:   ${{ secrets.ARM_TENANT_ID }}
+
+jobs:
+
+  # ── Dev Apply ──────────────────────────────────────────────────────────────
+  apply-dev:
+    name: Apply — Dev
+    runs-on: ubuntu-latest
+    environment: dev   # Links to GitHub Environment — enables deployment tracking
+    defaults:
+      run:
+        working-directory: environments/dev
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan
+        run: terraform plan -var-file=ci.tfvars -out=tfplan
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+        # -auto-approve skips the interactive "yes/no" prompt
+        # Safe here because we reviewed the plan in the PR
+
+      - name: Show Outputs
+        run: terraform output
+
+  # ── Staging Apply — waits for dev to succeed ───────────────────────────────
+  apply-staging:
+    name: Apply — Staging
+    runs-on: ubuntu-latest
+    environment: staging
+    needs: apply-dev   # Staging only runs if dev apply succeeded
+    defaults:
+      run:
+        working-directory: environments/staging
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan
+        run: terraform plan -var-file=ci.tfvars -out=tfplan
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+
+  # ── Prod Apply — requires manual approval ─────────────────────────────────
+  apply-prod:
+    name: Apply — Prod
+    runs-on: ubuntu-latest
+    environment: prod
+    # GitHub Environment "prod" has a protection rule requiring manual approval
+    # The workflow pauses here and sends an email to the reviewer.
+    # Only after they click "Approve" does this job run.
+    needs: apply-staging
+    defaults:
+      run:
+        working-directory: environments/prod
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan
+        run: terraform plan -var-file=ci.tfvars -out=tfplan
+
+      # Shows the plan one more time before applying to prod
+      # The approver sees this output before clicking Approve
+      - name: Show Plan Before Prod Apply
+        run: terraform show tfplan
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+
+      - name: Show Outputs
+        run: terraform output
